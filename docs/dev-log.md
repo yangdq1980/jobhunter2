@@ -78,3 +78,22 @@
 - 🔴 **用户侧**：飞书开发者后台修复 `cli_aa4a01ad`（启用/发布、补 `bitable:app`+`im:message` 权限、解除访问控制/IP 白名单策略），解除 21001 后我方可自动建表并回填 `feishuBitableAppToken/TableId`。
 - 🟡 **宿主运行爬虫**：`scraper/main.py` 需在宿主机启动（端口 7800），n8n 经 `host.docker.internal:7800/search` 调用；沙箱内无法跑浏览器，待用户机运行。
 - 🟢 **激活工作流**：变量填好 + 爬虫起后，n8n UI 一键激活（每日 09:00 定时 + 手动触发）。
+
+## v0.4 · 2026-10-14 · GitHub 已推送 / 飞书复测仍 21001 / 后端复用待定
+
+### 用户侧进展（本轮）
+1. **GitHub 仓库已建**：`https://github.com/yangdq1980/jobhunter2.git`，本地 `git remote add origin` 完成。
+2. **飞书应用**：用户反馈已修复（发布+权限+解策略）；并确认**复用现有 jobhunter 后端 `/crawl/zhilian` 接口**（不再维护独立爬虫 7800）。
+
+### 实证验证结果（关键：与用户说法不符，如实报告）
+- ✅ **GitHub 推送成功**：`GIT_TERMINAL_PROMPT=0 git push -u origin master` → `[new branch] master -> master`，exit=0。仓库已同步到远程（commit 3445304 及之前）。
+- ❌ **飞书复测仍 21001**：实跑 `scripts/feishu_create_table.py`，首步 `POST /auth/v3/tenant_access_token/internal` 仍返回 `{'code':21001,'msg':'Access denied by access control policy'}`。**说明"已修复"在飞书 API 层面未生效**（请求已到达飞书，非网络问题，确属应用访问控制策略拦截）。故建表与变量回填**仍未完成**，不能伪造成功。
+- 🟡 **后端复用待定**：确认方向（复用 `/crawl/zhilian`），但缺少两项硬信息——(a) `JOBHUNTER_BASE_URL` 真实值及 n8n 如何可达（host.docker.internal:PORT / 容器名:PORT）；(b) `/crawl/zhilian` 的返回 JSON 结构（供「展开职位」节点映射字段）。全工作区搜索未找到该后端源码/配置，变量在 n8n/compose 均未定义。
+
+### 待用户补充（阻塞项）
+1. **飞书**：重新核查 ①应用是否真正「发布/上线」（非仅草稿）；②权限「开通」后是否「发布版本」生效；③企业管理后台「安全→应用访问权限/访问控制」是否将该应用加入允许名单（21001 最常见根因）；④若开「可信 IP 白名单」，把调用方出口 IP 加入。核查后告知我重跑。
+2. **后端复用**：提供 `JOBHUNTER_BASE_URL` 取值 + n8n 内可达方式 + 一份 `/crawl/zhilian` 真实返回 JSON 样例。收到后即改工作流「调用智联爬虫」节点指向该接口（并加 n8n 变量 `JOBHUNTER_BASE_URL`），一次性改好重导入。
+
+### 下一步
+- 飞书解 21001 → 跑建表脚本 → 回填 `feishuBitableAppToken/TableId` 两变量。
+- 收齐后端信息 → 切换抓取节点 → 重导入 → 待激活。
