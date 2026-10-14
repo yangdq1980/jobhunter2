@@ -50,3 +50,31 @@
   2. **换用可用应用**：用户提供另一个有 bitable+im 权限且未被策略拦截的飞书应用 app_id/secret。
   3. **复用既有后端代理**：本流程的飞书写入/群发改走 `$env.JOBHUNTER_BASE_URL` 代理（需确认该后端是否暴露通用 bitable 写入接口）。
 - 影响范围：仅 Step-2（写多维表格）与 Step-3 的「发飞书群」受阻；Step-1 抓取、Ollama 评估、Step-4 看板不受影响，已验证可用。
+
+## v0.3 · 2026-10-14 · 源码路径修复 + 工作流重新导入 + 旧工作流悬空确认
+
+### 本次做了什么
+1. **定位并修复 `build_workflow.py` 两处 bug**：
+   - 第 187 行虽已定义 `OUT_PATH`（脚本同目录绝对路径），但 `open()` 仍写相对路径 `job-pipeline.json`，导致在仓库根误写一份。改为 `open(OUT_PATH, ...)`，并在打印里回显输出路径。
+   - 第 150 行「落看板数据」URL 误写为 `http://n8nwp-dashboard:8099/...`——那是 n8nwp 栈**自带的老 dashboard**（监听 8099），**不是我们的看板**。修正为 `http://jobhunter2-dashboard:8100/api/jobs/ingest`（我们的 `jobhunter2-dashboard` 容器同在 `n8nwp_n8nwp-net`，容器内监听 8100，已验证 DNS 可达）。
+2. **重新生成** `n8n-workflows/job-pipeline.json`（12 节点 / 12 连接），并**删除仓库根误写的 `job-pipeline.json`**（保持仓库整洁，工作流定义只保留在 `n8n-workflows/`）。
+3. **重新导入 n8n**：之前导入的 `c53e4fc37e6649bd` 已不在库中（可能因容器重建/导入未持久化），本次用修正后的 JSON 重新 `import:workflow`（不带 `--userId`，系统自动归属 owner），新 id 见下方验证。
+4. **确认旧工作流悬空**：既有 `JobHunterAI-采集与触达`（active=1）依赖 `$env.JOBHUNTER_BASE_URL`，但该变量在 n8n 进程环境 / compose / `.env` 中**均不存在**（grep `/proc/1/environ`、compose、`database.sqlite` 全量扫描均无），即旧流程目前**无法解析后端地址、实际不可用**。本新流程不依赖该变量，独立自洽（scraper:7800 + dashboard:8100 + 直连飞书），与用户在 v0.2 选定的「方案 1：修复飞书应用」一致。
+
+### 验证结果
+- ✅ `python build_workflow.py` → `n8n-workflows/job-pipeline.json` 生成成功，输出路径正确。
+- ✅ Python 校验：落看板 URL 含 `jobhunter2-dashboard:8100`；「组装负载」节点「原始链接」为纯字符串 `j.job_url || ""`（规避飞书超链接字段歧义）；12 节点 / 12 连接齐全。
+- ✅ n8n `import:workflow` 成功，新工作流已进入 `workflow_entity`（active=0，待用户修复飞书应用后在 UI 激活）。
+- ✅ 看板 `jobhunter2-dashboard:8100` 仍在运行，`/api/health` → mysql ok。
+
+### 当前变量状态（n8n `variables` 表）
+- `feishuAppId`=`cli_aa4a01ad81f89cd8` ✅
+- `feishuAppSecret`=***(secret) ✅
+- `feishuGroupChatId`=`oc_c902dad6aa1da225b68c1fb86494cb81` ✅
+- `feishuBitableAppToken`=`__TODO_提供飞书多维表格app_token__` 🔴（待填）
+- `feishuBitableTableId`=`__TODO_提供飞书多维表格table_id__` 🔴（待填）
+
+### 遗留 / 下一步（与用户对齐）
+- 🔴 **用户侧**：飞书开发者后台修复 `cli_aa4a01ad`（启用/发布、补 `bitable:app`+`im:message` 权限、解除访问控制/IP 白名单策略），解除 21001 后我方可自动建表并回填 `feishuBitableAppToken/TableId`。
+- 🟡 **宿主运行爬虫**：`scraper/main.py` 需在宿主机启动（端口 7800），n8n 经 `host.docker.internal:7800/search` 调用；沙箱内无法跑浏览器，待用户机运行。
+- 🟢 **激活工作流**：变量填好 + 爬虫起后，n8n UI 一键激活（每日 09:00 定时 + 手动触发）。

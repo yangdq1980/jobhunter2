@@ -34,3 +34,6 @@ n8n-workflows/*.export.json
 
 # ===== 文档编译中间产物 =====
 *.tmp
+
+# 飞书建表脚本产物(含表标识，非密钥，忽略)
+.feishu_bitable.txt

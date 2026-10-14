@@ -4,7 +4,10 @@
 Step1 抓取 → Step2 写飞书多维表格 → Step3 Ollama 评估+发飞书群 → Step4 落看板(MySQL)
 飞书凭证与 Bitable 目标从 n8n Variables 读取（$vars.xxx），由 scripts/setup_n8n.py 注入。
 """
-import json, uuid
+import json, uuid, os
+
+# 始终写到本脚本同目录，避免在不同 cwd 下误写到别处
+OUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "job-pipeline.json")
 
 def nid():
     return uuid.uuid4().hex
@@ -120,7 +123,7 @@ const bitable_fields = {
   "经验": j.experience || "",
   "学历": j.education || "",
   "描述": (j.description || "").slice(0, 4000),
-  "原始链接": j.job_url ? {"text": "查看职位", "link": j.job_url} : {"text": "", "link": ""},
+  "原始链接": j.job_url || "",
   "评估结论": evalText.slice(0, 2000),
   "匹配度": match,
   "抓取时间": new Date(j.crawled_at || Date.now()).getTime()
@@ -144,7 +147,7 @@ add(http("发飞书群", "POST",
         extra={"position": [1680, 440]}, headers={"Authorization": AUTH}))
 
 # ---------- Step4：落看板(MySQL, 经 dashboard API)----------
-add(http("落看板数据", "POST", "http://n8nwp-dashboard:8099/api/jobs/ingest",
+add(http("落看板数据", "POST", "http://jobhunter2-dashboard:8100/api/jobs/ingest",
         ('{"platform":"={{ $json.platform }}","title":"={{ $json.title }}",'
          '"company_name":"={{ $json.company_name }}","salary_raw":"={{ $json.salary_raw }}",'
          '"city":"={{ $json.city }}","district":"={{ $json.district }}",'
@@ -181,6 +184,7 @@ workflow = {
     "versionId": nid(),
 }
 
-with open("job-pipeline.json", "w", encoding="utf-8") as f:
+with open(OUT_PATH, "w", encoding="utf-8") as f:
     json.dump(workflow, f, ensure_ascii=False, indent=2)
+print(f"输出路径: {OUT_PATH}")
 print(f"已生成 job-pipeline.json：{len(nodes)} 个节点, {len(conns)} 条连接")
