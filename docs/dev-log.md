@@ -32,3 +32,21 @@
 - 🟡 **爬虫微服务宿主运行**：`scraper/` 代码与 `requirements.txt`/`Dockerfile`/`run_host.bat|sh`/`README.md` 齐备，需在宿主机 `pip install` 并 `python main.py`（沙箱内被拦截，无法在此跑浏览器）。
 - 🟡 **激活工作流**：填好 Bitable 变量 + 启动爬虫后，在 n8n UI 一键激活（每日 09:00 定时 + 手动触发）。
 - 🟢 **GitHub 每日同步**：本地 git 仓库初始化 + 首次提交；远程仓库与每日同步脚本/自动化待建立（见下节）。
+
+## v0.2 · 2026-10-14 · 飞书接入受阻（已定位根因）
+
+### 现象
+用户选择「自动创建飞书多维表格」。执行建表脚本时，调用 `POST /open-apis/auth/v3/tenant_access_token/internal`（app_id=`cli_aa4a01ad81f89cd8`）返回：
+`{"code":21001,"msg":"Access denied by access control policy. Contact the administrator for assistance."}`
+在**沙箱**与**用户本机 n8n 容器**内复测，均返回 21001 → 排除沙箱 IP 因素，确认是飞书应用 `cli_aa4a01ad` 的「访问控制策略」在拒绝授权。
+
+### 关键旁证：既有流水线不直连飞书
+排查既有 `JobHunterAI-采集与触达` 工作流的飞书节点，其 URL 为 `={{ $env.JOBHUNTER_BASE_URL }}/sync/feishu/push`（与 `/pull`），即**走用户自有 jobhunter 后端代理**，并非 n8n 直连 `open.feishu.cn`。这正是既有流程能正常触达飞书的原因。本新流程若直接拿 `cli_aa4a01ad` 调飞书会被策略拦。
+
+### 结论 / 待用户决策
+- 直接以 `cli_aa4a01ad` 从 n8n 调飞书不可行（21001），建表与运行期「获取飞书Token/写多维表格/发群」均会失败。
+- 可行路径（三选一，待用户拍板）：
+  1. **修复该应用**：在飞书开发者后台启用/发布 `cli_aa4a01ad`、补 bitable/im 权限并解除访问控制限制；之后我即可自动建表并填变量。
+  2. **换用可用应用**：用户提供另一个有 bitable+im 权限且未被策略拦截的飞书应用 app_id/secret。
+  3. **复用既有后端代理**：本流程的飞书写入/群发改走 `$env.JOBHUNTER_BASE_URL` 代理（需确认该后端是否暴露通用 bitable 写入接口）。
+- 影响范围：仅 Step-2（写多维表格）与 Step-3 的「发飞书群」受阻；Step-1 抓取、Ollama 评估、Step-4 看板不受影响，已验证可用。
