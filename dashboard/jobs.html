@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>职位采集流水线 · 看板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f7fb; --card:#ffffff; --ink:#1f2a44; --sub:#6b7794;
+    --brand:#5b8def; --brand2:#8a6df0; --hi:#ef6363; --mid:#f0a93b; --lo:#37c2a0;
+    --line:#e7ecf5;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    background:linear-gradient(135deg,#eef3fb 0%,#f6f1fb 100%);color:var(--ink);padding:24px;}
+  h1{font-size:22px;margin:0 0 4px;font-weight:700}
+  .sub{color:var(--sub);font-size:13px;margin-bottom:20px}
+  .grid{display:grid;gap:16px}
+  .cards{grid-template-columns:repeat(4,1fr)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+    box-shadow:0 6px 20px rgba(91,141,239,.06)}
+  .kpi{font-size:30px;font-weight:800;background:linear-gradient(135deg,var(--brand),var(--brand2));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .kpi-label{color:var(--sub);font-size:13px;margin-top:4px}
+  .charts{grid-template-columns:repeat(2,1fr);margin-top:16px}
+  .chart-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;
+    box-shadow:0 6px 20px rgba(91,141,239,.06)}
+  .chart-card h3{margin:0 0 12px;font-size:15px}
+  .table-card{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:16px 18px;box-shadow:0 6px 20px rgba(91,141,239,.06)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:10px 8px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--sub);font-weight:600}
+  .badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;color:#fff}
+  .b-高{background:var(--hi)} .b-中{background:var(--mid)} .b-低{background:var(--lo)}
+  a.link{color:var(--brand);text-decoration:none}
+  .refresh{float:right;font-size:12px;color:var(--brand);cursor:pointer;border:1px solid var(--line);
+    border-radius:8px;padding:4px 12px;background:#fff}
+  @media(max-width:880px){.cards,.charts{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <h1>职位采集流水线 · 看板</h1>
+  <div class="sub">智联招聘 → 飞书多维表格 → Ollama 评估 → 看板 ｜ 实时统计与可视化</div>
+
+  <div class="grid cards">
+    <div class="card"><div class="kpi" id="k-total">—</div><div class="kpi-label">累计职位</div></div>
+    <div class="card"><div class="kpi" id="k-high">—</div><div class="kpi-label">高匹配度</div></div>
+    <div class="card"><div class="kpi" id="k-company">—</div><div class="kpi-label">覆盖公司</div></div>
+    <div class="card"><div class="kpi" id="k-city">—</div><div class="kpi-label">覆盖城市</div></div>
+  </div>
+
+  <div class="grid charts">
+    <div class="chart-card"><h3>匹配度分布</h3><canvas id="c-match"></canvas></div>
+    <div class="chart-card"><h3>城市分布</h3><canvas id="c-city"></canvas></div>
+    <div class="chart-card"><h3>学历要求分布</h3><canvas id="c-edu"></canvas></div>
+    <div class="chart-card"><h3>近 14 日采集趋势</h3><canvas id="c-daily"></canvas></div>
+  </div>
+
+  <div class="table-card">
+    <span class="refresh" onclick="loadAll()">↻ 刷新</span>
+    <h3 style="margin:0 0 12px;font-size:15px">职位明细（按入库时间倒序）</h3>
+    <table>
+      <thead><tr><th>职位</th><th>公司</th><th>薪资</th><th>地点</th><th>学历</th><th>匹配度</th><th>链接</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="7" style="color:var(--sub)">加载中…</td></tr></tbody>
+    </table>
+  </div>
+
+<script>
+const PALETTE=['#5b8def','#8a6df0','#37c2a0','#f0a93b','#ef6363','#4db6e6','#b085f5','#ff8fa3'];
+function badge(m){const t=(m||'中').trim();return `<span class="badge b-${t}">${t}</span>`;}
+async function loadAll(){
+  try{
+    const [s,j]=await Promise.all([fetch('/api/jobs/stats').then(r=>r.json()),fetch('/api/jobs?limit=200').then(r=>r.json())]);
+    document.getElementById('k-total').textContent=s.total;
+    document.getElementById('k-high').textContent=s.high_match;
+    document.getElementById('k-company').textContent=s.by_company.length;
+    document.getElementById('k-city').textContent=s.by_city.length;
+    drawMatch(s.by_match); drawCity(s.by_city); drawEdu(s.by_edu); drawDaily(s.daily);
+    const rows=(j.jobs||[]).map(r=>`<tr>
+      <td>${r.title||''}</td><td>${r.company_name||''}</td><td>${r.salary_raw||'面议'}</td>
+      <td>${(r.city||'')+(r.district?('·'+r.district):'')}</td><td>${r.education||'-'}</td>
+      <td>${badge(r.match_level)}</td>
+      <td>${r.job_url?`<a class="link" href="${r.job_url}" target="_blank">查看</a>`:'-'}</td></tr>`).join('');
+    document.getElementById('rows').innerHTML=rows||'<tr><td colspan="7" style="color:var(--sub)">暂无数据</td></tr>';
+  }catch(e){document.getElementById('rows').innerHTML='<tr><td colspan="7" style="color:var(--hi)">加载失败：'+e+'</td></tr>';}
+}
+let charts={};
+function mk(id,type,labels,data,opts={}){
+  if(charts[id])charts[id].destroy();
+  charts[id]=new Chart(document.getElementById(id),{type,data:{labels,datasets:[{data,backgroundColor:PALETTE,borderWidth:0,...opts}]},options:{plugins:{legend:{display:type!=='bar'||opts.legend}},maintainAspectRatio:false}});
+}
+function drawMatch(d){const m={'高':0,'中':0,'低':0};(d||[]).forEach(x=>{if(x.match_level in m)m[x.match_level]=x.c;});mk('c-match','doughnut',['高','中','低'],[m['高'],m['中'],m['低']],{legend:true});}
+function drawCity(d){const l=(d||[]).map(x=>x.city).filter(Boolean).slice(0,8);const v=(d||[]).map(x=>x.c).slice(0,8);mk('c-city','bar',l,v,{legend:false});}
+function drawEdu(d){const l=(d||[]).map(x=>x.education||'未标注').slice(0,8);const v=(d||[]).map(x=>x.c).slice(0,8);mk('c-edu','bar',l,v,{legend:false});}
+function drawDaily(d){const l=(d||[]).map(x=>x.d).slice(-14);const v=(d||[]).map(x=>x.c).slice(-14);mk('c-daily','line',l,v,{legend:false});}
+loadAll();setInterval(loadAll,30000);
+</script>
+</body>
+</html>
