@@ -11,9 +11,9 @@
 
 | 步 | 能力 | 关键组件 |
 |----|------|----------|
-| ① | 智联招聘按关键词采集（公司/职位/薪资/地点/描述/链接） | `scraper/` FastAPI 微服务（Playwright，宿主机 :7800） |
-| ② | 写入飞书多维表格（字段完整统一） | n8n → 飞书 `bitable/v1` |
-| ③ | 本地 Ollama(`qwen3:8b`) 综合评估 + 推送飞书群 | n8n Ollama 节点 + 飞书 `im/v1` |
+| ① | 智联招聘按关键词采集（复用既有 jobhunter 后端成熟爬虫） | 既有 jobhunter 后端 `POST /crawl/zhilian`（宿主机 :8911） |
+| ② | 写入飞书多维表格（控制面板） | n8n → 既有 jobhunter 后端 `POST /sync/feishu/push` 代理（飞书鉴权在后端 `.env`，绕开 21001） |
+| ③ | 本地 Ollama(`qwen3:8b`) 综合评估 + 推送飞书群 | n8n Ollama 节点（取 `GET /jobs` 命中职位）+ 飞书 `im/v1`（n8n 直连，仅高/中匹配） |
 | ④ | 看板统计与可视化（匹配度/城市/学历/趋势） | `dashboard/` FastAPI + Chart.js（:8100） |
 
 ---
@@ -50,15 +50,15 @@ jobhunter2/
 
 ## 三、快速开始
 
-### 1. 启动爬虫微服务（宿主机）
+### 1. 启动既有 jobhunter 后端（宿主机，路线 B 抓取源）
 ```bash
-cd scraper
-pip install -r requirements.txt
-playwright install chromium        # 首次需安装浏览器
-cp .env.feishu.example .env.feishu # 填入飞书凭证（或直接用已存在的 .env.feishu）
-python main.py                     # 监听 :7800
+# 最简单：双击 G:/workbuddy/workspace/jobhunterforai/start.cmd
+# 或手动起：
+cd G:/workbuddy/workspace/jobhunterforai
+C:/Users/admin/.workbuddy/binaries/python/envs/default/Scripts/python.exe -m jobhunter.main serve
 ```
-> 沙箱环境无法运行浏览器，需在宿主机执行；复用已登录 Chrome Profile 可绕过智联登录墙。
+> 后端监听 `0.0.0.0:8911`；n8n 经 `host.docker.internal:8911` 调用 `/crawl/zhilian` 等接口。
+> 保持窗口常驻；飞书多维表凭据已在后端 `.env`（`FEISHU_BASE_APP_TOKEN` / `FEISHU_TABLE_ID`），**无需在 n8n 侧填**。
 
 ### 2. 启动看板服务（Docker）
 ```bash
@@ -73,10 +73,12 @@ docker run -d --name jobhunter2-dashboard --network n8nwp_n8nwp-net -p 127.0.0.1
 ### 3. 导入并激活 n8n 工作流
 - 工作流已随项目提供：`n8n-workflows/job-pipeline.json`（也可由 `build_workflow.py` 重新生成）。
 - 在 n8n UI（http://127.0.0.1:5678）导入；或容器内 `n8n import:workflow --input=job-pipeline.json`。
+- 工作流 id = **`c53e4fc37e6649bd`**（路线 B）。若列表里还有一条同名旧残留 `3fa3c09b6c7c474c`，请手动删除（设置 ⚙ → Delete）。
 - 设置 n8n Variables（Settings → Variables）：
-  `feishuAppId` / `feishuAppSecret` / `feishuGroupChatId`（已填）；
-  `feishuBitableAppToken` / `feishuBitableTableId`（**待填**，填好后「写飞书多维表格」节点生效）。
-- 确认爬虫微服务已起、Bitable 变量已填后，激活工作流（每日 09:00 定时 + 手动触发）。
+  `feishuAppId` / `feishuAppSecret`（已填，供「获取飞书Token」取 tenant_access_token）；
+  `feishuGroupChatId`（已填，飞书群 chat_id）。
+  ⚠️ **不再需要** `feishuBitableAppToken` / `feishuBitableTableId` —— 飞书多维表写入已改走后端代理 `/sync/feishu/push`，鉴权在后端 `.env`。
+- 确认后端（start.cmd）已起后，激活工作流（每日 09:00 定时 + 手动触发）。
 
 ---
 
@@ -103,7 +105,7 @@ scripts\sync.bat
 
 ## 五、待办 / 状态
 
-- 🔴 飞书多维表格目标表 `app_token` / `table_id` 待提供（填好即启用 Step-2）。
-- 🟢 n8n 工作流已导入（id `3fa3c09b6c7c474c`），当前未激活，待上述条件满足后激活。
+- 🟢 n8n 工作流已导入（路线 B，id `c53e4fc37e6649bd`），当前未激活；启动后端 + 删除旧残留 `3fa3c09b6c7c474c` 后激活即可每日 09:00 跑。
+- 🟢 飞书多维表写入已改走后端代理 `/sync/feishu/push`，**无需** `app_token`/`table_id` 等 n8n 变量（凭据在后端 `.env`）。
 - 🟢 看板服务已构建并运行（:8100），端到端验证通过。
 - 🟢 文档体系（需求/架构/开发日志）已建立并随仓库提交。

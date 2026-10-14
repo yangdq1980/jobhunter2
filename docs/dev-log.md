@@ -124,3 +124,48 @@
 ### 备选路线（绕开 21001）
 - 路线 B：飞书写入改走既有 jobhunter 后端 `/sync/feishu/push`（该后端已能与飞书通信，不受本应用 21001 影响）。需后端地址 + 接口契约。
 
+---
+
+## v0.6 · 2026-10-14 · 路线 B 落地：复用 jobhunter 后端，飞书写入改走后端代理
+
+### 用户决策（本轮）
+明确选择「路线 B」：复用既有 jobhunter 后端（`G:/workbuddy/workspace/jobhunterforai`）的成熟接口，飞书多维表写入改走后端代理 `/sync/feishu/push`，不再依赖 n8n 直连飞书（彻底绕开 21001，无需再修飞书应用）。
+
+### 用户要的两项硬信息（已查实，无需再追问）
+1. **`JOBHUNTER_BASE_URL = http://host.docker.internal:8911`**
+   - 后端 FastAPI（`jobhunterforai`）监听 `0.0.0.0:8911`；n8n 跑在 Docker，经 `host.docker.internal` 访问宿主机后端。
+   - 已**硬编码进 `build_workflow.py` 的 `BACKEND` 常量**，生成的工作流无需再配 n8n 环境变量（改端口只改这一行重新生成即可）。
+2. **接口真实返回样例**（直接读后端源码 `jobhunter/api.py` 确认，非推测）：
+   - `POST /crawl/zhilian?keywords=...&max_jobs=...`（无 body，后端自读 config；也可传 keywords 覆盖）→
+     `{"platform":"zhilian","crawled":N,"new":M,"warning":null,"note":"已评分并写入 SQLite；非黄埔职位在采集层已过滤。"}`
+     ⚠️ 该接口**不返回职位 JSON**，职位落后端 SQLite；需另调 `GET /jobs` 取数供评估。
+   - `GET /jobs?matched=true&limit=200` → 返回 `job_to_dict` 数组，字段含：`platform / title / company_name / salary_raw / city / district / experience / education / description / job_url / crawled_at / score / matched / trigger_status / ...`
+   - `POST /sync/feishu/push`（无 body）→ `{"ok":true,"pushed":N,"created":N,"updated":N}` 或 `{"ok":false,"reason":"..."}`
+     - 飞书鉴权全在后端 `jobhunter/feishu_client.py`，凭据来自后端 `.env`（`FEISHU_APP_ID/SECRET/BASE_APP_TOKEN/TABLE_ID`），**n8n 侧零飞书凭据**。
+     - 写入多维表字段：**平台 / 职位名称 / 公司 / 城市 / 区域 / 薪资 / 评分 / 是否命中 / 触发状态 / 职位链接 / 招聘者 / 经验 / 学历**（这是「控制面板」；Ollama 自然语言摘要不进多维表，改走飞书群消息 + 看板 ingest）。
+
+### 本次做了什么（一次改好）
+- 重写 `n8n-workflows/build_workflow.py`（路线 B 版，13 节点 / 13 连接）：
+  - ① 调用智联爬虫 → `POST {BACKEND}/crawl/zhilian?keywords={{ $json.keywords.join(',') }}&max_jobs={{ $json.maxJobs }}`
+  - ② 写飞书多维表格 → `POST {BACKEND}/sync/feishu/push`（无 body，走后端代理，绕开 21001）
+  - ③ Ollama评估 → `GET {BACKEND}/jobs?matched=true&limit=200` 取命中职位 → qwen3:8b 逐条评估 → 组装负载（正则解析 高/中/低）→ 落看板 + 筛选「高/中」发飞书群
+  - ④ 落看板数据 → `POST jobhunter2-dashboard:8100/api/jobs/ingest`（字段 `match`/`evaluation` 对齐 `dashboard/app.py`）
+- 工作流 id 固定为 **`c53e4fc37e6649bd`**（与 README 一致），`import:workflow` 按 id 幂等覆盖，不堆积重复项。
+- 重新生成 `job-pipeline.json` 并 `n8n import:workflow` 成功（日志确认 `c53e4fc37e6649bd` 已就地升级为 `(RouteB)`）。
+
+### 验证结果
+- ✅ `python build_workflow.py` → 13 节点 / 13 连接，JSON 合法（`json.load` 通过）。
+- ✅ n8n `import:workflow` 成功；`list:workflow` 确认 `c53e4fc37e6649bd | 智联职位采集→飞书→Ollama评估→看板 (RouteB)` 已就地升级，无新建重复项。
+- ✅ 看板 `jobhunter2-dashboard` 容器运行中（Up 4h），Step ④ 链路可用。
+- ✅ Ollama 节点 `n8n-nodes-base.ollama` 在本实例可用（导入成功即代表节点校验通过）。
+
+### 遗留 / 需用户侧
+- 🟡 **启动后端**：运行前请在宿主机双击 `G:/workbuddy/workspace/jobhunterforai/start.cmd` 拉起后端（:8911），工作流才能打到 `/crawl/zhilian` 等接口。
+- 🟡 **删除陈旧重复工作流**：n8n 里仍有一条同名旧残留 `3fa3c09b6c7c474c`（之前会话导入，非 Route B）。本实例含多条重要生产工作流，为避免动生产库出错，未做 DB 手术删除。请在 n8n UI 手动删除：Workflows → 搜 `智联职位采集` → 找到 **id 以 `3fa3c09` 开头**的那条 → 设置(⚙) → Delete。
+- 🟢 **激活时变量**：只需 `feishuAppId` / `feishuAppSecret` / `feishuGroupChatId`（均已填）；**不再需要** `feishuBitableAppToken` / `feishuBitableTableId`（飞书写入已走后端代理）。后端起 + 旧残留删后，UI 激活即可每日 09:00 跑。
+- 🟢 **GitHub**：本轮改动（`build_workflow.py` + `job-pipeline.json` + 文档）待提交推送（见下节）。
+
+### 下一步
+- 提交并推送 GitHub（`build_workflow.py` / `job-pipeline.json` / `docs/*`）。
+- 用户机启动后端 + 激活工作流后，观察首跑：飞书多维表出现职位（控制面板）、飞书群收到「高/中」匹配简报、看板 `:8100/jobs` 更新。
+

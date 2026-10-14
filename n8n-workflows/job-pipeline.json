@@ -1,9 +1,9 @@
 {
-  "id": "3fa3c09b6c7c474c",
-  "name": "智联职位采集→飞书→Ollama评估→看板",
+  "id": "c53e4fc37e6649bd",
+  "name": "智联职位采集→飞书→Ollama评估→看板 (RouteB)",
   "nodes": [
     {
-      "id": "7a74f4bb6e9149ce849e1951c0aa7f47",
+      "id": "953d31e4bbdf4173ad7e60a4f3761907",
       "name": "手动触发",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -14,7 +14,7 @@
       "parameters": {}
     },
     {
-      "id": "a1482778d3ae4358bab5fa025d1f0d84",
+      "id": "a4fbff0d527946bbb87fbe623fd00ded",
       "name": "每日定时触发",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
@@ -35,7 +35,7 @@
       }
     },
     {
-      "id": "ca6fcf1da4aa4ad0b2b680308c33389c",
+      "id": "654ea71825e8451380c1609b5a408b44",
       "name": "配置",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.2,
@@ -48,29 +48,18 @@
         "assignments": {
           "assignments": [
             {
-              "id": "107373ebd217491cb89773e135a54411",
+              "id": "dad63784fc1f4bcf94056db653127bca",
               "name": "keywords",
               "type": "array",
               "value": [
                 "AI解决方案架构师",
                 "云计算架构师",
-                "解决方案架构师"
+                "解决方案架构师",
+                "售前解决方案工程师"
               ]
             },
             {
-              "id": "55ba9e62a95f4abcbebada785356226f",
-              "name": "city",
-              "type": "string",
-              "value": "广州"
-            },
-            {
-              "id": "df4d0bba5da04355a7e8964c9940b874",
-              "name": "maxPages",
-              "type": "number",
-              "value": 3
-            },
-            {
-              "id": "a80d6d3e4fa440ba823dae87e64094b8",
+              "id": "f9ecd840b48442eb9e76ec193447b0bc",
               "name": "maxJobs",
               "type": "number",
               "value": 50
@@ -81,7 +70,7 @@
       }
     },
     {
-      "id": "2861f5c21b644f17988a78c66bd02c18",
+      "id": "8289a95a264846ddaf41fcb96b17472f",
       "name": "获取飞书Token",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -104,26 +93,12 @@
         },
         "position": [
           240,
-          640
+          720
         ]
       }
     },
     {
-      "id": "8d356e059dd14d40a7a1344469cc2b35",
-      "name": "拆分关键词",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        480,
-        400
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "\nconst c = $input.first().json;\nreturn (c.keywords || []).map(kw => ({ json: { kw, city: c.city, maxPages: c.maxPages, maxJobs: c.maxJobs } }));\n"
-      }
-    },
-    {
-      "id": "1104782da41443248af63dcf1a671fb7",
+      "id": "aba986adf11749bd89c14750c8d1ad38",
       "name": "调用智联爬虫",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -133,10 +108,57 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "http://host.docker.internal:7800/search",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\"kw\":\"={{ $json.kw }}\",\"city\":\"={{ $json.city }}\",\"max_pages\":{{ $json.maxPages }},\"max_jobs\":{{ $json.maxJobs }}}",
+        "url": "http://host.docker.internal:8911/crawl/zhilian?keywords={{ $json.keywords.join(',') }}&max_jobs={{ $json.maxJobs }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "position": [
+          480,
+          400
+        ]
+      }
+    },
+    {
+      "id": "33a306f07fdd49dca42ed633c302adb4",
+      "name": "写飞书多维表格",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8911/sync/feishu/push",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "position": [
+          720,
+          560
+        ]
+      }
+    },
+    {
+      "id": "540a49fe46e64bb88e7c9464c41c7e46",
+      "name": "拉取职位",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8911/jobs?matched=true&limit=200",
         "options": {
           "response": {
             "response": {
@@ -151,7 +173,7 @@
       }
     },
     {
-      "id": "fe06ce6f2e3845fead793f750a3cc9c4",
+      "id": "21a805692ab54f8faa73d5dec26708fd",
       "name": "展开职位",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -161,11 +183,11 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "\nconst out = [];\nfor (const item of $input.all()) {\n  const jobs = item.json.jobs || [];\n  for (const j of jobs) out.push({ json: j });\n}\nreturn out;\n"
+        "jsCode": "\nconst out = [];\nfor (const item of $input.all()) {\n  const d = item.json;\n  if (Array.isArray(d)) { for (const j of d) out.push({ json: j }); }\n  else if (Array.isArray(d.jobs)) { for (const j of d.jobs) out.push({ json: j }); }\n  else if (Array.isArray(d.data)) { for (const j of d.data) out.push({ json: j }); }\n  else { out.push({ json: d }); }\n}\nreturn out;\n"
       }
     },
     {
-      "id": "7b5464e384dc45f3b05f0224328b8ce3",
+      "id": "9b52d089a06c4fec9a27369300cd8f2f",
       "name": "Ollama评估",
       "type": "n8n-nodes-base.ollama",
       "typeVersion": 1,
@@ -183,7 +205,7 @@
       }
     },
     {
-      "id": "50d1deb9daaf415690a6b8527563dc2f",
+      "id": "665f84c8826b4556959455ed4d6eca53",
       "name": "组装负载",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -193,83 +215,11 @@
       ],
       "parameters": {
         "mode": "runForEachItem",
-        "jsCode": "\nconst j = item.json;\nconst evalText = (j.text || \"\").trim();\nlet match = \"中\";\nconst m = evalText.match(/匹配度[：:]\\s*(高|中|低)/);\nif (m) match = m[1];\nconst feishu_text = `【职位评估简报】\\n职位：${j.title}\\n公司：${j.company_name}`\n  + `\\n薪资：${j.salary_raw || '面议'}\\n地点：${j.city || ''}${j.district ? ('·' + j.district) : ''}`\n  + `\\n经验：${j.experience || '-'} | 学历：${j.education || '-'}\\n\\n${evalText}`\n  + `\\n\\n🔗 ${j.job_url || ''}`;\nconst bitable_fields = {\n  \"平台\": j.platform || \"智联\",\n  \"职位名\": j.title,\n  \"公司名\": j.company_name,\n  \"薪资范围\": j.salary_raw || \"\",\n  \"工作地点\": (j.city || \"\") + (j.district ? (\"·\" + j.district) : \"\"),\n  \"经验\": j.experience || \"\",\n  \"学历\": j.education || \"\",\n  \"描述\": (j.description || \"\").slice(0, 4000),\n  \"原始链接\": j.job_url || \"\",\n  \"评估结论\": evalText.slice(0, 2000),\n  \"匹配度\": match,\n  \"抓取时间\": new Date(j.crawled_at || Date.now()).getTime()\n};\nitem.json = Object.assign({}, j, { feishu_text, bitable_fields, match, evaluation: evalText });\nreturn item;\n"
+        "jsCode": "\nconst j = item.json;\nconst evalText = (j.text || j.output || \"\").trim();\nlet match = \"中\";\nconst m = evalText.match(/匹配度[：:]\\s*(高|中|低)/);\nif (m) match = m[1];\nconst feishu_text = `【职位评估简报】\\n职位：${j.title}\\n公司：${j.company_name}`\n  + `\\n薪资：${j.salary_raw || '面议'}\\n地点：${j.city || ''}${j.district ? ('·' + j.district) : ''}`\n  + `\\n经验：${j.experience || '-'} | 学历：${j.education || '-'}\\n\\n${evalText}`\n  + `\\n\\n🔗 ${j.job_url || ''}`;\nitem.json = Object.assign({}, j, { feishu_text, match, evaluation: evalText });\nreturn item;\n"
       }
     },
     {
-      "id": "5a2d548893a4457aa31fe84d862fcbe3",
-      "name": "写飞书多维表格",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        0,
-        0
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $vars.feishuBitableAppToken }}/tables/{{ $vars.feishuBitableTableId }}/records/batch_create",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\"records\":[{\"fields\": {{ $json.bitable_fields }}}]}",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "json"
-            }
-          }
-        },
-        "position": [
-          1680,
-          280
-        ],
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $('获取飞书Token').first().json.tenant_access_token }}"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "2ae8ae685e86403fb563f31ea4f253ba",
-      "name": "发飞书群",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        0,
-        0
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\"receive_id\":\"={{ $vars.feishuGroupChatId }}\",\"msg_type\":\"text\",\"content\":\"={{ JSON.stringify({text: $json.feishu_text}) }}\"}",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "json"
-            }
-          }
-        },
-        "position": [
-          1680,
-          440
-        ],
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $('获取飞书Token').first().json.tenant_access_token }}"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "e4152fafe5484da4a96a6e2f83dd4e8d",
+      "id": "aceb0f374f8c4e91b00ba9091e0a4037",
       "name": "落看板数据",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -292,8 +242,58 @@
         },
         "position": [
           1680,
-          600
+          400
         ]
+      }
+    },
+    {
+      "id": "7eba4d0181b84502b88337808dceffac",
+      "name": "筛选高匹配",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nreturn $input.all().filter(it => {\n  const mm = (it.json.match || \"\");\n  return mm === \"高\" || mm === \"中\";\n});\n"
+      }
+    },
+    {
+      "id": "2f932ad72fc044dc89e43f99653f43fb",
+      "name": "发飞书群",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"receive_id\":\"={{ $vars.feishuGroupChatId }}\",\"msg_type\":\"text\",\"content\":\"={{ JSON.stringify({text: $json.feishu_text}) }}\"}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "position": [
+          1920,
+          560
+        ],
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('获取飞书Token').first().json.tenant_access_token }}"
+            }
+          ]
+        }
       }
     }
   ],
@@ -324,22 +324,10 @@
       "main": [
         [
           {
-            "node": "拆分关键词",
-            "type": "main",
-            "index": 0
-          },
-          {
             "node": "获取飞书Token",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "获取飞书Token": {},
-    "拆分关键词": {
-      "main": [
-        [
+          },
           {
             "node": "调用智联爬虫",
             "type": "main",
@@ -348,7 +336,25 @@
         ]
       ]
     },
+    "获取飞书Token": {},
     "调用智联爬虫": {
+      "main": [
+        [
+          {
+            "node": "拉取职位",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "写飞书多维表格",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "写飞书多维表格": {},
+    "拉取职位": {
       "main": [
         [
           {
@@ -385,30 +391,35 @@
       "main": [
         [
           {
-            "node": "写飞书多维表格",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "发飞书群",
-            "type": "main",
-            "index": 0
-          },
-          {
             "node": "落看板数据",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "筛选高匹配",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "写飞书多维表格": {},
-    "发飞书群": {},
-    "落看板数据": {}
+    "落看板数据": {},
+    "筛选高匹配": {
+      "main": [
+        [
+          {
+            "node": "发飞书群",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "发飞书群": {}
   },
   "settings": {
     "executionOrder": "v1"
   },
   "active": false,
-  "versionId": "ded3ec00f62445c7bf1404ccb3dfd7b1"
+  "versionId": "dec869c4c47242fba5226fc7e46ded09"
 }
