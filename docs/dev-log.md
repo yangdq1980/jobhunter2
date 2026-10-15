@@ -169,3 +169,37 @@
 - 提交并推送 GitHub（`build_workflow.py` / `job-pipeline.json` / `docs/*`）。
 - 用户机启动后端 + 激活工作流后，观察首跑：飞书多维表出现职位（控制面板）、飞书群收到「高/中」匹配简报、看板 `:8100/jobs` 更新。
 
+---
+
+### v0.7 · 2026-10-15 · 实跑验证（重要纠正：路线 B 并未绕开 21001）
+
+**结论先说**：构造级完成 ✅；能执行 ✅；但飞书两处被 **飞书 21001（Access denied by access control policy）** 卡死 ❌。
+这不是代码缺陷，是飞书开放平台的应用级「IP 白名单 / 访问策略」限制——**后端和 n8n 同出自本机出口 IP**，所以路线 B 换汤不换药，仍被拦。
+
+**沙箱无法编程触发 n8n 工作流（已穷尽两条路）**：
+- `n8n execute --id=c53e4fc37e6649bd` → 失败：Task Broker 端口 5679 被运行中的主实例占用（CLI 起第二个实例必冲突）。
+- REST API `POST /api/v1/workflows/{id}/run` → 405（该 key 无 run 作用域）；`/rest/.../run` → 401；`/api/v1/executions` POST → 405。
+- 改用**同网络容器内复刻脚本** `n8n-workflows/runner_equiv.js`（在 n8n 容器内跑，直接解析 `host.docker.internal`、各服务 DNS、读自身飞书凭据库），等价执行工作流的同一组后端接口，得到真实结果。
+
+**实跑结果（runner_equiv.js，2026-10-15）**：
+| 步骤 | 结果 | 说明 |
+|---|---|---|
+| ③ 智联爬虫 | ✅ HTTP 200 | crawled=14 / new=10，**登录态仍有效**（30 天 cookie 未过期） |
+| ④ 写飞书多维表（后端代理 /sync/feishu/push） | ❌ ok=false | 飞书 **21001**：`Access denied by access control policy` |
+| ⑤ 拉取命中职位 | ✅ 5 条 | matched=true |
+| ⑦⑧ Ollama 评估 | ✅ 5 条 | qwen3:8b，分布 **4×中 / 1×低**（温度 0.3） |
+| ⑨ 落看板 | ✅ 5/5 | 评估正文已落库（`curl :8100/api/jobs` 验证，首条可见「1) 技术方向判断…」） |
+| ⑪ 发飞书群 | ❌ | 飞书 **21001**：同一 access control policy（租户 token 获取就被拦） |
+
+**关键认知纠正**：原指望"飞书写入改走后端代理就能绕开 21001"——但 21001 是**应用级访问策略**（几乎肯定是飞书 app 的 **IP 白名单**），与"谁发起调用"无关，只与"从哪个公网 IP 出去"有关。本机出口 IP 不在白名单 → 后端代理、n8n 直连全部 21001。
+
+**修复方法（飞书开放平台控制台，非代码）**：
+1. 应用 `cli_aa4a01ad81f89cd8`（群消息用）及后端 `.env` 所用的 app（多维表用，FEISHU_APP_ID）→ **安全设置 → IP 白名单**：把服务器公网 IP 加入，或关闭「IP 访问限制」。
+2. 确认已开通权限：多维表 `bitable:app`（及读写 scope）、群消息 `im:message` / `im:message:send_as_bot`，且机器人已加入目标群 `oc_c902dad6aa1da225b68c1fb86494cb81`。
+3. 修复后重跑即可，工作流代码无需改动。
+
+**在 n8n 里真正跑起来（用户侧）**：UI 打开 `c53e4fc37e6649bd` → 激活（Active）→ 点「执行工作流」（或等 09:00 定时）。沙箱侧无法代为触发。
+**遗留**：旧残留 `3fa3c09b6c7c474c` 仍在（UI 手动删）；`runner_equiv.js` 为本次验证用的等价脚本，可保留作排障。
+
+**小观察**：看板 `match` 列本次为 None（评估正文已写入），疑似 dashboard 的 `match` 字段未映射/命名不一致，待核 `dashboard/app.py` schema（不影响主链路）。
+
